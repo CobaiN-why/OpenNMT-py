@@ -49,16 +49,16 @@ class ConvMultiStepAttention(nn.Module):
 
         """
         # checks
-        #batch, channel, height, width = base_target_emb.size()
+        # batch, channel, height, width = base_target_emb.size()
         batch, _, height, _ = base_target_emb.size()
-        #batch_, channel_, height_, width_ = input_from_dec.size()
+        # batch_, channel_, height_, width_ = input_from_dec.size()
         batch_, _, height_, _ = input_from_dec.size()
         aeq(batch, batch_)
         aeq(height, height_)
 
-        #enc_batch, enc_channel, enc_height = encoder_out_top.size()
+        # enc_batch, enc_channel, enc_height = encoder_out_top.size()
         enc_batch, _, enc_height = encoder_out_top.size()
-        #enc_batch_, enc_channel_, enc_height_ = encoder_out_combine.size()
+        # enc_batch_, enc_channel_, enc_height_ = encoder_out_combine.size()
         enc_batch_, _, enc_height_ = encoder_out_combine.size()
 
         aeq(enc_batch, enc_batch_)
@@ -73,9 +73,8 @@ class ConvMultiStepAttention(nn.Module):
         if self.mask is not None:
             pre_attn.data.masked_fill_(self.mask, -float('inf'))
 
-        pre_attn = pre_attn.transpose(0, 2)
-        attn = F.softmax(pre_attn)
-        attn = attn.transpose(0, 2).contiguous()
+        attn = F.softmax(pre_attn, dim=2)
+
         context_output = torch.bmm(
             attn, torch.transpose(encoder_out_combine, 1, 2))
         context_output = torch.transpose(

@@ -175,8 +175,8 @@ def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache,
                 new_word.extend(word[i:])
                 break
 
-            if word[i] == first and i < len(word)-1 and word[i+1] == second:
-                new_word.append(first+second)
+            if word[i] == first and i < len(word) - 1 and word[i + 1] == second:
+                new_word.append(first + second)
                 i += 2
             else:
                 new_word.append(word[i])

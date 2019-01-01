@@ -1,14 +1,15 @@
-# -*- coding: utf-8 -*-
-"""Define inputters DatasetBase Class."""
-
+# coding: utf-8
 
 from itertools import chain
+from collections import Counter
+import codecs
+
 import torch
 import torchtext
+from torchtext.vocab import Vocab
 
 PAD_WORD = '<blank>'
 UNK_WORD = '<unk>'
-UNK = 0
 BOS_WORD = '<s>'
 EOS_WORD = '</s>'
 
@@ -34,19 +35,44 @@ class DatasetBase(torchtext.data.Dataset):
         self.__dict__.update(_d)
 
     def __reduce_ex__(self, proto):
-        "This is a hack. Something is broken with torch pickle."
+        # This is a hack. Something is broken with torch pickle.
         return super(DatasetBase, self).__reduce_ex__()
 
-    def load_fields(self, vocab_dict):
-        """ Load fields from vocab.pt, and set the `fields` attribute.
+    def __init__(self, fields, src_examples_iter, tgt_examples_iter,
+                 dynamic_dict=False, filter_pred=None):
 
-        Args:
-            vocab_dict (dict): a dict of loaded vocab from vocab.pt file.
-        """
-        fields = onmt.inputters.inputter.load_fields_from_vocab(
-            vocab_dict.items(), self.data_type)
-        self.fields = dict([(k, f) for (k, f) in fields.items()
-                            if k in self.examples[0].__dict__])
+        # Each element of an example is a dictionary whose keys represents
+        # at minimum the src tokens and their indices and potentially also
+        # the src and tgt features and alignment information.
+        if tgt_examples_iter is not None:
+            examples_iter = (self._join_dicts(src, tgt) for src, tgt in
+                             zip(src_examples_iter, tgt_examples_iter))
+        else:
+            examples_iter = src_examples_iter
+
+        # self.src_vocabs is used in collapse_copy_scores and in Translator.py
+        self.src_vocabs = []
+        if dynamic_dict:
+            unk, pad = fields['src'].unk_token, fields['src'].pad_token
+            examples_iter = (self._dynamic_dict(ex, unk, pad)
+                             for ex in examples_iter)
+
+        # Peek at the first to see which fields are used.
+        ex, examples_iter = self._peek(examples_iter)
+        keys = ex.keys()
+
+        # why do we need to use different keys from the ones passed in?
+        fields = [(k, fields[k]) if k in fields else (k, None) for k in keys]
+        example_values = ([ex[k] for k in keys] for ex in examples_iter)
+        examples = [self._construct_example_fromlist(ex_values, fields)
+                    for ex_values in example_values]
+
+        super(DatasetBase, self).__init__(examples, fields, filter_pred)
+
+    def save(self, path, remove_fields=True):
+        if remove_fields:
+            self.fields = []
+        torch.save(self, path)
 
     @staticmethod
     def extract_text_features(tokens):
@@ -60,19 +86,25 @@ class DatasetBase(torchtext.data.Dataset):
         if not tokens:
             return [], [], -1
 
-        split_tokens = [token.split(u"￨") for token in tokens]
-        split_tokens = [token for token in split_tokens if token[0]]
-        token_size = len(split_tokens[0])
+        specials = [PAD_WORD, UNK_WORD, BOS_WORD, EOS_WORD]
+        words = []
+        features = []
+        n_feats = None
+        for token in tokens:
+            split_token = token.split(u"￨")
+            assert all([special != split_token[0] for special in specials]), \
+                "Dataset cannot contain Special Tokens"
 
-        assert all(len(token) == token_size for token in split_tokens), \
-            "all words must have the same number of features"
-        words_and_features = list(zip(*split_tokens))
-        words = words_and_features[0]
-        features = words_and_features[1:]
+            if split_token[0]:
+                words += [split_token[0]]
+                features += [split_token[1:]]
 
-        return words, features, token_size - 1
-
-    # Below are helper functions for intra-class use only.
+                if n_feats is None:
+                    n_feats = len(split_token)
+                assert len(split_token) == n_feats, \
+                    "all words must have the same number of features"
+        features = list(zip(*features))
+        return tuple(words), features, n_feats - 1
 
     def _join_dicts(self, *args):
         """
@@ -109,6 +141,7 @@ class DatasetBase(torchtext.data.Dataset):
         Returns:
             the created `Example` object.
         """
+        # why does this exist?
         ex = torchtext.data.Example()
         for (name, field), val in zip(fields, data):
             if field is not None:
@@ -116,3 +149,26 @@ class DatasetBase(torchtext.data.Dataset):
             else:
                 setattr(ex, name, val)
         return ex
+
+    def _dynamic_dict(self, example, unk, pad):
+        # it would not be necessary to pass unk and pad if the method were
+        # called after fields becomes an attribute of self
+        src = example["src"]
+        src_vocab = Vocab(Counter(src), specials=[unk, pad])
+        self.src_vocabs.append(src_vocab)
+        # Map source tokens to indices in the dynamic dict.
+        src_map = torch.LongTensor([src_vocab.stoi[w] for w in src])
+        example["src_map"] = src_map
+
+        if "tgt" in example:
+            tgt = example["tgt"]
+            mask = torch.LongTensor(
+                [0] + [src_vocab.stoi[w] for w in tgt] + [0])
+            example["alignment"] = mask
+        return example
+
+    @classmethod
+    def _read_file(cls, path):
+        with codecs.open(path, "r", "utf-8") as f:
+            for line in f:
+                yield line

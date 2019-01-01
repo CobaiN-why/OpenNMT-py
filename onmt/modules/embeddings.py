@@ -3,10 +3,8 @@ import math
 
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 
 from onmt.modules.util_class import Elementwise
-from onmt.utils.misc import aeq
 
 
 class PositionalEncoding(nn.Module):
@@ -25,26 +23,26 @@ class PositionalEncoding(nn.Module):
     def __init__(self, dropout, dim, max_len=5000):
         pe = torch.zeros(max_len, dim)
         position = torch.arange(0, max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, dim, 2) *
-                             -(math.log(10000.0) / dim))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
+        div_term = torch.exp((torch.arange(0, dim, 2, dtype=torch.float) *
+                             -(math.log(10000.0) / dim)))
+        pe[:, 0::2] = torch.sin(position.float() * div_term)
+        pe[:, 1::2] = torch.cos(position.float() * div_term)
         pe = pe.unsqueeze(1)
         super(PositionalEncoding, self).__init__()
         self.register_buffer('pe', pe)
         self.dropout = nn.Dropout(p=dropout)
         self.dim = dim
 
-    def forward(self, emb):
-        # We must wrap the self.pe in Variable to compute, not the other
-        # way - unwrap emb(i.e. emb.data). Otherwise the computation
-        # wouldn't be watched to build the compute graph.
+    def forward(self, emb, step=None):
         emb = emb * math.sqrt(self.dim)
-        emb = emb + Variable(self.pe[:emb.size(0)], requires_grad=False)
+        if step is None:
+            emb = emb + self.pe[:emb.size(0)]
+        else:
+            emb = emb + self.pe[step]
         emb = self.dropout(emb)
         return emb
 
-# used by model_builder.py and subsequently by all encoders / decoders
+
 class Embeddings(nn.Module):
     """
     Words embeddings for encoder/decoder.
@@ -103,6 +101,8 @@ class Embeddings(nn.Module):
             feat_padding_idx = []
         self.word_padding_idx = word_padding_idx
 
+        self.word_vec_size = word_vec_size
+
         # Dimensions and padding for constructing the word embedding matrix
         vocab_sizes = [word_vocab_size]
         emb_dims = [word_vec_size]
@@ -150,7 +150,9 @@ class Embeddings(nn.Module):
             mlp = nn.Sequential(nn.Linear(in_dim, out_dim), nn.ReLU())
             self.make_embedding.add_module('mlp', mlp)
 
-        if position_encoding:
+        self.position_encoding = position_encoding
+
+        if self.position_encoding:
             pe = PositionalEncoding(dropout, self.embedding_size)
             self.make_embedding.add_module('pe', pe)
 
@@ -173,11 +175,18 @@ class Embeddings(nn.Module):
         """
         if emb_file:
             pretrained = torch.load(emb_file)
-            self.word_lut.weight.data.copy_(pretrained)
+            pretrained_vec_size = pretrained.size(1)
+            if self.word_vec_size > pretrained_vec_size:
+                self.word_lut.weight.data[:, :pretrained_vec_size] = pretrained
+            elif self.word_vec_size < pretrained_vec_size:
+                self.word_lut.weight.data \
+                    .copy_(pretrained[:, :self.word_vec_size])
+            else:
+                self.word_lut.weight.data.copy_(pretrained)
             if fixed:
                 self.word_lut.weight.requires_grad = False
 
-    def forward(self, source):
+    def forward(self, source, step=None):
         """
         Computes the embeddings for words and features.
 
@@ -186,14 +195,13 @@ class Embeddings(nn.Module):
         Return:
             `FloatTensor`: word embeddings `[len x batch x embedding_size]`
         """
-        in_length, in_batch, nfeat = source.size()
-        aeq(nfeat, len(self.emb_luts))
+        if self.position_encoding:
+            for i, module in enumerate(self.make_embedding._modules.values()):
+                if i == len(self.make_embedding._modules.values()) - 1:
+                    source = module(source, step=step)
+                else:
+                    source = module(source)
+        else:
+            source = self.make_embedding(source)
 
-        emb = self.make_embedding(source)
-
-        out_length, out_batch, emb_size = emb.size()
-        aeq(in_length, out_length)
-        aeq(in_batch, out_batch)
-        aeq(emb_size, self.embedding_size)
-
-        return emb
+        return source

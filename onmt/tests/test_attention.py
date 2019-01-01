@@ -1,7 +1,6 @@
 """
 Here come the tests for attention types and their compatibility
 """
-
 import unittest
 import torch
 from torch.autograd import Variable
@@ -12,6 +11,7 @@ import onmt
 class TestAttention(unittest.TestCase):
 
     def test_masked_global_attention(self):
+
         source_lengths = torch.IntTensor([7, 3, 5, 2])
         # illegal_weights_mask = torch.ByteTensor([
         #     [0, 0, 0, 0, 0, 0, 0],

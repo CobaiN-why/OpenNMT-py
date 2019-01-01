@@ -93,8 +93,7 @@ class Beam(object):
                 word_probs[k][self._eos] = -1e20
         # Sum the previous scores.
         if len(self.prev_ks) > 0:
-            beam_scores = word_probs + \
-                self.scores.unsqueeze(1).expand_as(word_probs)
+            beam_scores = word_probs + self.scores.unsqueeze(1)
             # Don't let EOS have children.
             for i in range(self.next_ys[-1].size(0)):
                 if self.next_ys[-1][i] == self._eos:
@@ -105,13 +104,14 @@ class Beam(object):
                 ngrams = []
                 le = len(self.next_ys)
                 for j in range(self.next_ys[-1].size(0)):
-                    hyp, _ = self.get_hyp(le-1, j)
+                    hyp, _ = self.get_hyp(le - 1, j)
                     ngrams = set()
                     fail = False
                     gram = []
-                    for i in range(le-1):
+                    for i in range(le - 1):
                         # Last n tokens, n = block_ngram_repeat
-                        gram = (gram + [hyp[i]])[-self.block_ngram_repeat:]
+                        gram = (gram +
+                                [hyp[i].item()])[-self.block_ngram_repeat:]
                         # Skip the blocking if it is in the exclusion list
                         if set(gram) & self.exclusion_tokens:
                             continue
@@ -172,7 +172,7 @@ class Beam(object):
         """
         hyp, attn = [], []
         for j in range(len(self.prev_ks[:timestep]) - 1, -1, -1):
-            hyp.append(self.next_ys[j+1][k])
+            hyp.append(self.next_ys[j + 1][k])
             attn.append(self.attn[j][k])
             k = self.prev_ks[j][k]
         return hyp[::-1], torch.stack(attn[::-1])
@@ -188,11 +188,11 @@ class GNMTGlobalScorer(object):
        beta (float):  coverage parameter
     """
 
-    def __init__(self, alpha, beta, cov_penalty, length_penalty):
-        self.alpha = alpha
-        self.beta = beta
-        penalty_builder = penalties.PenaltyBuilder(cov_penalty,
-                                                   length_penalty)
+    def __init__(self, opt):
+        self.alpha = opt.alpha
+        self.beta = opt.beta
+        penalty_builder = penalties.PenaltyBuilder(opt.coverage_penalty,
+                                                   opt.length_penalty)
         # Term will be subtracted from probability
         self.cov_penalty = penalty_builder.coverage_penalty()
         # Probability will be divided by this

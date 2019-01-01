@@ -4,7 +4,6 @@ Implementation of "Convolutional Sequence to Sequence Learning"
 import torch
 import torch.nn as nn
 import torch.nn.init as init
-import torch.nn.functional as F
 
 import onmt.modules
 
@@ -15,7 +14,7 @@ def shape_transform(x):
     """ Tranform the size of the tensors to fit for conv input. """
     return torch.unsqueeze(torch.transpose(x, 1, 2), 3)
 
-# this is used by cnn_decoder.py 
+
 class GatedConv(nn.Module):
     """ Gated convolution for CNN class """
 
@@ -24,17 +23,17 @@ class GatedConv(nn.Module):
         self.conv = onmt.modules.WeightNormConv2d(
             input_size, 2 * input_size, kernel_size=(width, 1), stride=(1, 1),
             padding=(width // 2 * (1 - nopad), 0))
-        init.xavier_uniform(self.conv.weight, gain=(4 * (1 - dropout))**0.5)
+        init.xavier_uniform_(self.conv.weight, gain=(4 * (1 - dropout))**0.5)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x_var):
         x_var = self.dropout(x_var)
         x_var = self.conv(x_var)
         out, gate = x_var.split(int(x_var.size(1) / 2), 1)
-        out = out * F.sigmoid(gate)
+        out = out * torch.sigmoid(gate)
         return out
 
-# this is used by cnn_encoder.py
+
 class StackedCNN(nn.Module):
     """ Stacked CNN class """
 

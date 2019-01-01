@@ -79,7 +79,7 @@ def update_pair_statistics(pair, changed, stats, indices):
     stats[pair] = 0
     indices[pair] = defaultdict(int)
     first, second = pair
-    new_pair = first+second
+    new_pair = first + second
     for j, word, old_word, freq in changed:
 
         # find all instances of pair, and update frequency/indices around it
@@ -91,17 +91,17 @@ def update_pair_statistics(pair, changed, stats, indices):
             except ValueError:
                 break
             # if first symbol is followed by second symbol, we've found an occurrence of pair (old_word[i:i+2])
-            if i < len(old_word)-1 and old_word[i+1] == second:
+            if i < len(old_word) - 1 and old_word[i + 1] == second:
                 # assuming a symbol sequence "A B C", if "B C" is merged, reduce the frequency of "A B"
                 if i:
-                    prev = old_word[i-1:i+1]
+                    prev = old_word[i - 1:i + 1]
                     stats[prev] -= freq
                     indices[prev][j] -= 1
-                if i < len(old_word)-2:
+                if i < len(old_word) - 2:
                     # assuming a symbol sequence "A B C B", if "B C" is merged, reduce the frequency of "C B".
                     # however, skip this if the sequence is A B C B C, because the frequency of "C B" will be reduced by the previous code block
-                    if old_word[i+2] != first or i >= len(old_word)-3 or old_word[i+3] != second:
-                        nex = old_word[i+1:i+3]
+                    if old_word[i + 2] != first or i >= len(old_word) - 3 or old_word[i + 3] != second:
+                        nex = old_word[i + 1:i + 3]
                         stats[nex] -= freq
                         indices[nex][j] -= 1
                 i += 2
@@ -117,13 +117,13 @@ def update_pair_statistics(pair, changed, stats, indices):
                 break
             # assuming a symbol sequence "A BC D", if "B C" is merged, increase the frequency of "A BC"
             if i:
-                prev = word[i-1:i+1]
+                prev = word[i - 1:i + 1]
                 stats[prev] += freq
                 indices[prev][j] += 1
             # assuming a symbol sequence "A BC B", if "B C" is merged, increase the frequency of "BC B"
             # however, if the sequence is A BC BC, skip this step because the count of "BC BC" will be incremented by the previous code block
-            if i < len(word)-1 and word[i+1] != new_pair:
-                nex = word[i:i+2]
+            if i < len(word) - 1 and word[i + 1] != new_pair:
+                nex = word[i:i + 2]
                 stats[nex] += freq
                 indices[nex][j] += 1
             i += 1
@@ -199,7 +199,7 @@ def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=F
     outfile.write('#version: 0.2\n')
 
     vocab = get_vocabulary(infile, is_dict)
-    vocab = dict([(tuple(x[:-1])+(x[-1]+'</w>',), y)
+    vocab = dict([(tuple(x[:-1]) + (x[-1] + '</w>',), y)
                   for (x, y) in vocab.items()])
     sorted_vocab = sorted(vocab.items(), key=lambda x: x[1], reverse=True)
 
@@ -217,7 +217,7 @@ def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=F
             stats = copy.deepcopy(big_stats)
             most_frequent = max(stats, key=lambda x: (stats[x], x))
             # threshold is inspired by Zipfian assumption, but should only affect speed
-            threshold = stats[most_frequent] * i/(i+10000.0)
+            threshold = stats[most_frequent] * i / (i + 10000.0)
             prune_stats(stats, big_stats, threshold)
 
         if stats[most_frequent] < min_frequency:

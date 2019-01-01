@@ -5,12 +5,18 @@ from datetime import datetime
 
 import onmt
 
+from onmt.utils.logging import logger
+
 
 def build_report_manager(opt):
     if opt.tensorboard:
-        from tensorboard import SummaryWriter
-        writer = SummaryWriter(opt.tensorboard_log_dir
-                               + datetime.now().strftime("/%b-%d_%H-%M-%S"),
+        from tensorboardX import SummaryWriter
+        tensorboard_log_dir = opt.tensorboard_log_dir
+
+        if not opt.train_from:
+            tensorboard_log_dir += datetime.now().strftime("/%b-%d_%H-%M-%S")
+
+        writer = SummaryWriter(tensorboard_log_dir,
                                comment="Unmt")
     else:
         writer = None
@@ -25,7 +31,7 @@ class ReportMgrBase(object):
     Report Manager Base class
     Inherited classes should override:
         * `_report_training`
-        * `_report_epoch`
+        * `_report_step`
     """
 
     def __init__(self, report_every, start_time=-1.):
@@ -42,15 +48,18 @@ class ReportMgrBase(object):
     def start(self):
         self.start_time = time.time()
 
-    def report_training(self, epoch, batch, num_batches, learning_rate, report_stats):
-        """ 
+    def log(self, *args, **kwargs):
+        logger.info(*args, **kwargs)
+
+    def report_training(self, step, num_steps, learning_rate,
+                        report_stats, multigpu=False):
+        """
         This is the user-defined batch-level traing progress
         report function.
 
         Args:
-            epoch(int): current epoch count.
-            batch(int): current batch count.
-            num_batches(int): total number of batches.
+            step(int): current step count.
+            num_steps(int): total number of batches.
             learning_rate(float): current learning rate.
             report_stats(Statistics): old Statistics instance.
         Returns:
@@ -60,29 +69,34 @@ class ReportMgrBase(object):
             raise ValueError("""ReportMgr needs to be started
                                 (set 'start_time' or use 'start()'""")
 
-        if batch % self.report_every == -1 % self.report_every:
+        if step % self.report_every == 0:
+            if multigpu:
+                report_stats = \
+                    onmt.utils.Statistics.all_gather_stats(report_stats)
             self._report_training(
-                epoch, batch, num_batches, learning_rate, report_stats)
+                step, num_steps, learning_rate, report_stats)
             self.progress_step += 1
-        return onmt.utils.Statistics()
+            return onmt.utils.Statistics()
+        else:
+            return report_stats
 
     def _report_training(self, *args, **kwargs):
         """ To be overridden """
         raise NotImplementedError()
 
-    def report_epoch(self, lr, epoch, train_stats=None, valid_stats=None):
+    def report_step(self, lr, step, train_stats=None, valid_stats=None):
         """
-        Report stats of a whole epoch
+        Report stats of a step
 
         Args:
             train_stats(Statistics): training stats
             valid_stats(Statistics): validation stats
             lr(float): current learning rate
         """
-        self._report_epoch(
-            lr, epoch, train_stats=train_stats, valid_stats=valid_stats)
+        self._report_step(
+            lr, step, train_stats=train_stats, valid_stats=valid_stats)
 
-    def _report_epoch(self, *args, **kwargs):
+    def _report_step(self, *args, **kwargs):
         raise NotImplementedError()
 
 
@@ -105,11 +119,13 @@ class ReportMgr(ReportMgrBase):
             stats.log_tensorboard(
                 prefix, self.tensorboard_writer, learning_rate, step)
 
-    def _report_training(self, epoch, batch, num_batches, learning_rate, report_stats):
+    def _report_training(self, step, num_steps, learning_rate,
+                         report_stats):
         """
         See base class method `ReportMgrBase.report_training`.
         """
-        report_stats.output(epoch, batch + 1, num_batches, self.start_time)
+        report_stats.output(step, num_steps,
+                            learning_rate, self.start_time)
 
         # Log the progress using the number of batches on the x-axis.
         self.maybe_log_tensorboard(report_stats,
@@ -120,24 +136,24 @@ class ReportMgr(ReportMgrBase):
 
         return report_stats
 
-    def _report_epoch(self, lr, epoch, train_stats=None, valid_stats=None):
+    def _report_step(self, lr, step, train_stats=None, valid_stats=None):
         """
-        See base class method `ReportMgrBase.report_epoch`.
+        See base class method `ReportMgrBase.report_step`.
         """
         if train_stats is not None:
-            print('Train perplexity: %g' % train_stats.ppl())
-            print('Train accuracy: %g' % train_stats.accuracy())
+            self.log('Train perplexity: %g' % train_stats.ppl())
+            self.log('Train accuracy: %g' % train_stats.accuracy())
 
             self.maybe_log_tensorboard(train_stats,
                                        "train",
                                        lr,
-                                       epoch)
+                                       step)
 
         if valid_stats is not None:
-            print('Validation perplexity: %g' % valid_stats.ppl())
-            print('Validation accuracy: %g' % valid_stats.accuracy())
+            self.log('Validation perplexity: %g' % valid_stats.ppl())
+            self.log('Validation accuracy: %g' % valid_stats.accuracy())
 
             self.maybe_log_tensorboard(valid_stats,
                                        "valid",
                                        lr,
-                                       epoch)
+                                       step)

@@ -1,9 +1,7 @@
 """ Translation main class """
-from __future__ import division, unicode_literals
-from __future__ import print_function
+from __future__ import unicode_literals, print_function
 
 import torch
-import onmt.inputters as inputters
 
 
 class TranslationBuilder(object):
@@ -38,14 +36,14 @@ class TranslationBuilder(object):
                 tokens.append(vocab.itos[tok])
             else:
                 tokens.append(src_vocab.itos[tok - len(vocab)])
-            if tokens[-1] == inputters.EOS_WORD:
+            if tokens[-1] == self.fields["tgt"].eos_token:
                 tokens = tokens[:-1]
                 break
-        if self.replace_unk and (attn is not None) and (src is not None):
+        if self.replace_unk and attn is not None and src is not None:
             for i in range(len(tokens)):
-                if tokens[i] == vocab.itos[inputters.UNK]:
-                    _, maxIndex = attn[i].max(0)
-                    tokens[i] = src_raw[maxIndex[0]]
+                if tokens[i] == self.fields["tgt"].unk_token:
+                    _, max_index = attn[i].max(0)
+                    tokens[i] = src_raw[max_index.item()]
         return tokens
 
     def from_batch(self, translation_batch):
@@ -63,17 +61,13 @@ class TranslationBuilder(object):
                     key=lambda x: x[-1])))
 
         # Sorting
-        inds, perm = torch.sort(batch.indices.data)
+        inds, perm = torch.sort(batch.indices)
         data_type = self.data.data_type
         if data_type == 'text':
-            src = batch.src[0].data.index_select(1, perm)
+            src = batch.src[0].index_select(1, perm)
         else:
             src = None
-
-        if self.has_tgt:
-            tgt = batch.tgt.data.index_select(1, perm)
-        else:
-            tgt = None
+        tgt = batch.tgt.index_select(1, perm) if self.has_tgt else None
 
         translations = []
         for b in range(batch_size):
@@ -96,10 +90,11 @@ class TranslationBuilder(object):
                     src_vocab, src_raw,
                     tgt[1:, b] if tgt is not None else None, None)
 
-            translation = Translation(src[:, b] if src is not None else None,
-                                      src_raw, pred_sents,
-                                      attn[b], pred_score[b], gold_sent,
-                                      gold_score[b])
+            translation = Translation(
+                src[:, b] if src is not None else None,
+                src_raw, pred_sents, attn[b], pred_score[b],
+                gold_sent, gold_score[b]
+            )
             translations.append(translation)
 
         return translations
@@ -133,23 +128,23 @@ class Translation(object):
 
     def log(self, sent_number):
         """
-        Log translation to stdout.
+        Log translation.
         """
+
         output = '\nSENT {}: {}\n'.format(sent_number, self.src_raw)
 
         best_pred = self.pred_sents[0]
         best_score = self.pred_scores[0]
         pred_sent = ' '.join(best_pred)
         output += 'PRED {}: {}\n'.format(sent_number, pred_sent)
-        print("PRED SCORE: {:.4f}".format(best_score))
+        output += "PRED SCORE: {:.4f}\n".format(best_score)
 
         if self.gold_sent is not None:
             tgt_sent = ' '.join(self.gold_sent)
             output += 'GOLD {}: {}\n'.format(sent_number, tgt_sent)
-            # output += ("GOLD SCORE: {:.4f}".format(self.gold_score))
-            print("GOLD SCORE: {:.4f}".format(self.gold_score))
+            output += ("GOLD SCORE: {:.4f}\n".format(self.gold_score))
         if len(self.pred_sents) > 1:
-            print('\nBEST HYP:')
+            output += '\nBEST HYP:\n'
             for score, sent in zip(self.pred_scores, self.pred_sents):
                 output += "[{:.4f}] {}\n".format(score, sent)
 

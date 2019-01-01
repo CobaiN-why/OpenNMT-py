@@ -1,6 +1,4 @@
 """Define RNN-based encoders."""
-from __future__ import division
-
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -55,13 +53,13 @@ class RNNEncoder(EncoderBase):
         self._check_args(src, lengths)
 
         emb = self.embeddings(src)
-        #s_len, batch, emb_dim = emb.size()
+        # s_len, batch, emb_dim = emb.size()
 
         packed_emb = emb
         if lengths is not None and not self.no_pack_padded_seq:
-            # Lengths data is wrapped inside a Variable.
-            lengths = lengths.view(-1).tolist()
-            packed_emb = pack(emb, lengths)
+            # Lengths data is wrapped inside a Tensor.
+            lengths_list = lengths.view(-1).tolist()
+            packed_emb = pack(emb, lengths_list)
 
         memory_bank, encoder_final = self.rnn(packed_emb)
 
@@ -70,7 +68,7 @@ class RNNEncoder(EncoderBase):
 
         if self.use_bridge:
             encoder_final = self._bridge(encoder_final)
-        return encoder_final, memory_bank
+        return encoder_final, memory_bank, lengths
 
     def _initialize_bridge(self, rnn_type,
                            hidden_size,

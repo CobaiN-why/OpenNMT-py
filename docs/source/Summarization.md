@@ -1,6 +1,19 @@
 # Example: Summarization
 
-This document describes how to replicate summarization experiments on the CNNDM and gigaword datasets using OpenNMT-py.
+Note: The process and results below are presented in our paper `Bottom-Up Abstractive Summarization`. Please consider citing it if you follow these instructions. 
+
+```
+@inproceedings{gehrmann2018bottom,
+  title={Bottom-Up Abstractive Summarization},
+  author={Gehrmann, Sebastian and Deng, Yuntian and Rush, Alexander},
+  booktitle={Proceedings of the 2018 Conference on Empirical Methods in Natural Language Processing},
+  pages={4098--4109},
+  year={2018}
+}
+```
+
+
+This document describes how to replicate summarization experiments on the CNN-DM and gigaword datasets using OpenNMT-py.
 In the following, we assume access to a tokenized form of the corpus split into train/valid/test set. You can find the data [here](https://github.com/harvardnlp/sent-summary).
 
 An example article-title pair from Gigaword should look like this:
@@ -16,11 +29,11 @@ An example article-title pair from Gigaword should look like this:
 
 Since we are using copy-attention [1] in the model, we need to preprocess the dataset such that source and target are aligned and use the same dictionary. This is achieved by using the options `dynamic_dict` and `share_vocab`.
 We additionally turn off truncation of the source to ensure that inputs longer than 50 words are not truncated.
-For CNNDM we follow See et al. [2] and additionally truncate the source length at 400 tokens and the target at 100. We also note that in CNNDM, we found models to work better if the target surrounds sentences with tags such that a sentence looks like `<t> w1 w2 w3 . </t>`. If you use this formatting, you can remove the tags after the inference step with the commands `sed -i 's/ <\/t>//g' FILE.txt` and `sed -i 's/<t> //g' FILE.txt`.
+For CNN-DM we follow See et al. [2] and additionally truncate the source length at 400 tokens and the target at 100. We also note that in CNN-DM, we found models to work better if the target surrounds sentences with tags such that a sentence looks like `<t> w1 w2 w3 . </t>`. If you use this formatting, you can remove the tags after the inference step with the commands `sed -i 's/ <\/t>//g' FILE.txt` and `sed -i 's/<t> //g' FILE.txt`.
 
 **Command used**:
 
-(1) CNNDM
+(1) CNN-DM
 
 ```
 python preprocess.py -train_src data/cnndm/train.txt.src \
@@ -34,7 +47,7 @@ python preprocess.py -train_src data/cnndm/train.txt.src \
                      -tgt_seq_length_trunc 100 \
                      -dynamic_dict \
                      -share_vocab \
-                     -max_shard_size (500 * 1024 * 1024)
+                     -shard_size 100000
 ```
 
 (2) Gigaword
@@ -48,7 +61,7 @@ python preprocess.py -train_src data/giga/train.article.txt \
                      -src_seq_length 10000 \
                      -dynamic_dict \
                      -share_vocab \
-                     -max_shard_size (500 * 1024 * 1024)
+                     -shard_size 100000
 ```
 
 
@@ -67,12 +80,12 @@ The training procedure described in this section for the most part follows param
 
 
 We are using using a 128-dimensional word-embedding, and 512-dimensional 1 layer LSTM. On the encoder side, we use a bidirectional LSTM (`brnn`), which means that the 512 dimensions are split into 256 dimensions per direction.
-We also use OpenNMT's default learning rate decay, which halves the learning rate after every epoch once the validation perplexity increased after an epoch (or after epoch 8).
+
 We additionally set the maximum norm of the gradient to 2, and renormalize if the gradient norm exceeds this value and do not use any dropout.
 
 **commands used**:
 
-(1) CNNDM
+(1) CNN-DM
 
 ```
 python train.py -save_model models/cnndm \
@@ -83,10 +96,11 @@ python train.py -save_model models/cnndm \
                 -rnn_size 512 \
                 -layers 1 \
                 -encoder_type brnn \
-                -epochs 20 \
+                -train_steps 200000 \
                 -max_grad_norm 2 \
                 -dropout 0. \
                 -batch_size 16 \
+                -valid_batch_size 16 \
                 -optim adagrad \
                 -learning_rate 0.15 \
                 -adagrad_accumulator_init 0.1 \
@@ -94,12 +108,13 @@ python train.py -save_model models/cnndm \
                 -copy_loss_by_seqlength \
                 -bridge \
                 -seed 777 \
-                -gpuid X
+                -world_size 2 \
+                -gpu_ranks 0 1
 ```
 
-(2) CNNDM Transformer
+(2) CNN-DM Transformer
 
-The following script trains the transformer model on CNNDM
+The following script trains the transformer model on CNN-DM
 
 ```
 python -u train.py -data data/cnndm/CNNDM \
@@ -123,13 +138,14 @@ python -u train.py -data data/cnndm/CNNDM \
                    -batch_type tokens \
                    -normalization tokens \
                    -max_generator_batches 2 \
-                   -epochs 25 \
+                   -train_steps 200000 \
                    -start_checkpoint_at 8 \
                    -accum_count 4 \
                    -share_embeddings \
                    -copy_attn \
                    -param_init_glorot \
-                   -gpuid 3
+                   -world_size 2 \
+                   -gpu_ranks 0 1
 ```
 
 (3) Gigaword
@@ -141,13 +157,13 @@ python train.py -data data/giga/GIGA \
                 -save_model models/giga \
                 -copy_attn \
                 -reuse_copy_attn \
-                -epochs 20
+                -train_steps 200000
 ```
 
 
 ### Inference
 
-During inference, we use beam-search with a beam-size of 5. We also added specific penalties that we can use during decoding, described in the following.
+During inference, we use beam-search with a beam-size of 10. We also added specific penalties that we can use during decoding, described in the following.
 
 - `stepwise_penalty`: Applies penalty at every step
 - `coverage_penalty summary`: Uses a penalty that prevents repeated attention to the same source word
@@ -159,12 +175,12 @@ During inference, we use beam-search with a beam-size of 5. We also added specif
 
 **commands used**:
 
-(1) CNNDM
+(1) CNN-DM
 
 ```
 python translate.py -gpu X \
                     -batch_size 20 \
-                    -beam_size 5 \
+                    -beam_size 10 \
                     -model models/cnndm... \
                     -src data/cnndm/test.txt.src \
                     -output testout/cnndm.out \
@@ -184,18 +200,18 @@ python translate.py -gpu X \
 
 ### Evaluation
 
-#### CNNDM
+#### CNN-DM
 
-To evaluate the ROUGE scores on CNNDM, we extended the pyrouge wrapper with additional evaluations such as the amount of repeated n-grams (typically found in models with copy attention), found [here](https://github.com/sebastianGehrmann/rouge-baselines). The repository includes a sub-repo called pyrouge. Make sure to clone the code with the `git clone --recurse-submodules https://github.com/sebastianGehrmann/rouge-baselines` command to check this out as well and follow the installation instructions on the pyrouge repository before calling this script.
+To evaluate the ROUGE scores on CNN-DM, we extended the pyrouge wrapper with additional evaluations such as the amount of repeated n-grams (typically found in models with copy attention), found [here](https://github.com/sebastianGehrmann/rouge-baselines). The repository includes a sub-repo called pyrouge. Make sure to clone the code with the `git clone --recurse-submodules https://github.com/sebastianGehrmann/rouge-baselines` command to check this out as well and follow the installation instructions on the pyrouge repository before calling this script.
 The installation instructions can be found [here](https://github.com/falcondai/pyrouge/tree/9cdbfbda8b8d96e7c2646ffd048743ddcf417ed9#installation). Note that on MacOS, we found that the pointer to your perl installation in line 1 of `pyrouge/RELEASE-1.5.5/ROUGE-1.5.5.pl` might be different from the one you have installed. A simple fix is to change this line to `#!/usr/local/bin/perl -w` if it fails.
 
 It can be run with the following command:
 
 ```
-python baseline.py -s testout/cnndm.out -t data/cnndm/test.txt.tgt -m no_sent_tag -r
+python baseline.py -s testout/cnndm.out -t data/cnndm/test.txt.tgt -m sent_tag_verbatim -r
 ```
 
-The `no_sent_tag` option strips tags around sentences - when a sentence previously was `<s> w w w w . </s>`, it becomes `w w w w .`.
+The `sent_tag_verbatim` option strips `<t>` and `</t>` tags around sentences - when a sentence previously was `<t> w w w w . </t>`, it becomes `w w w w .`.
 
 #### Gigaword
 
@@ -206,7 +222,9 @@ For evaluation of large test sets such as Gigaword, we use the a parallel python
 
 ### Scores and Models
 
-#### CNNDM
+The website generator has trouble rendering tables, if you can't read the results, please go [here](https://github.com/OpenNMT/OpenNMT-py/blob/master/docs/source/Summarization.md) for correct format.
+
+#### CNN-DM
 
 | Model Type    | Model    | R1 R  | R1 P  | R1 F  | R2 R  | R2 P  | R2 F  | RL R  | RL P  | RL F  |
 | ------------- |  -------- | -----:| -----:| -----:|------:| -----:| -----:|-----: | -----:| -----:|

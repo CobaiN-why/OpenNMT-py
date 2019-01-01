@@ -4,9 +4,9 @@
 LOG_FILE=/tmp/$$_pull_request_chk.log
 echo > ${LOG_FILE} # Empty the log file.
 
-PROJECT_ROOT=`dirname "$0"`"/.."
+PROJECT_ROOT=`dirname "$0"`"/../../"
 DATA_DIR="$PROJECT_ROOT/data"
-TEST_DIR="$PROJECT_ROOT/test"
+TEST_DIR="$PROJECT_ROOT/onmt/tests"
 PYTHON="python"
 
 clean_up()
@@ -35,7 +35,7 @@ environment_prepare()
   head /tmp/im2text/src-val.txt > /tmp/im2text/src-val-head.txt
   head /tmp/im2text/tgt-val.txt > /tmp/im2text/tgt-val-head.txt
 
-  wget -q -O /tmp/test_model_speech.pt http://lstm.seas.harvard.edu/latex/test_model_speech.pt
+  wget -q -O /tmp/test_model_speech.pt http://lstm.seas.harvard.edu/latex/model_step_2760.pt
 
   # Download speech2text corpus
   wget -q -O /tmp/speech.tgz http://lstm.seas.harvard.edu/latex/speech.tgz
@@ -50,7 +50,7 @@ environment_prepare()
 
 # flake8 check
 echo -n "[+] Doing flake8 check..."
-${PYTHON} -m flake8  >> ${LOG_FILE} 2>&1
+${PYTHON} -m flake8 >> ${LOG_FILE} 2>&1
 [ "$?" -eq 0 ] || error_exit
 echo "Succeeded" | tee -a ${LOG_FILE}
 
@@ -162,7 +162,7 @@ ${PYTHON} preprocess.py -train_src /tmp/src-val.txt \
 		     -tgt_vocab_size 1000        >> ${LOG_FILE} 2>&1
 ${PYTHON} train.py -data /tmp/q -rnn_size 2 -batch_size 10 \
 		-word_vec_size 5 -report_every 5        \
-		-rnn_size 10 -epochs 1                 >> ${LOG_FILE} 2>&1
+		-rnn_size 10 -train_steps 10        >> ${LOG_FILE} 2>&1
 ${PYTHON} translate.py -model ${TEST_DIR}/test_model2.pt  \
 		    -src ${DATA_DIR}/morph/src.valid   \
 		    -verbose -batch_size 10     \
@@ -190,12 +190,12 @@ ${PYTHON} preprocess.py -train_src /tmp/src-val.txt \
              -dynamic_dict               >> ${LOG_FILE} 2>&1
 ${PYTHON} train.py -data /tmp/q -rnn_size 2 -batch_size 10 \
 		-word_vec_size 5 -report_every 5        \
-		-rnn_size 10 -epochs 1 -copy_attn       >> ${LOG_FILE} 2>&1
+		-rnn_size 10 -train_steps 10 -copy_attn       >> ${LOG_FILE} 2>&1
 [ "$?" -eq 0 ] || error_exit
 echo "Succeeded" | tee -a ${LOG_FILE}
 
 
-echo -n "[+] Doing im2text {preprocess + train} test..."
+echo -n "[+] Doing im2text {preprocess w/sharding + train} test..."
 head /tmp/im2text/src-val.txt > /tmp/im2text/src-val-head.txt
 head /tmp/im2text/tgt-val.txt > /tmp/im2text/tgt-val-head.txt
 rm -rf /tmp/im2text/q*pt
@@ -205,10 +205,11 @@ ${PYTHON} preprocess.py -data_type img \
 		     -train_tgt /tmp/im2text/tgt-val-head.txt \
 		     -valid_src /tmp/im2text/src-val-head.txt \
 		     -valid_tgt /tmp/im2text/tgt-val-head.txt \
+             -shard_size 5 \
 		     -save_data /tmp/im2text/q  >> ${LOG_FILE} 2>&1
 ${PYTHON} train.py -model_type img \
 	        -data /tmp/im2text/q -rnn_size 2 -batch_size 10 \
-		-word_vec_size 5 -report_every 5 -rnn_size 10 -epochs 1  >> ${LOG_FILE} 2>&1
+		-word_vec_size 5 -report_every 5 -rnn_size 10 -train_steps 10  >> ${LOG_FILE} 2>&1
 [ "$?" -eq 0 ] || error_exit
 echo "Succeeded" | tee -a ${LOG_FILE}
 
@@ -223,10 +224,11 @@ ${PYTHON} preprocess.py -data_type audio \
 		     -train_tgt /tmp/speech/tgt-val-head.txt \
 		     -valid_src /tmp/speech/src-val-head.txt \
 		     -valid_tgt /tmp/speech/tgt-val-head.txt \
+             -shard_size 50 \
 		     -save_data /tmp/speech/q  >> ${LOG_FILE} 2>&1
 ${PYTHON} train.py -model_type audio \
 	        -data /tmp/speech/q -rnn_size 2 -batch_size 10 \
-		-word_vec_size 5 -report_every 5 -rnn_size 10 -epochs 1  >> ${LOG_FILE} 2>&1
+		-word_vec_size 5 -report_every 5 -rnn_size 10 -train_steps 10  >> ${LOG_FILE} 2>&1
 [ "$?" -eq 0 ] || error_exit
 echo "Succeeded" | tee -a ${LOG_FILE}
 
