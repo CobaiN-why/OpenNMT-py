@@ -7,3 +7,5 @@ git+https://github.com/pytorch/audio
 pyrouge
 pyonmttok
 opencv-python
+setuptools>=65.5.1 # not directly required, pinned by Snyk to avoid a vulnerability
+wheel>=0.38.0 # not directly required, pinned by Snyk to avoid a vulnerability
